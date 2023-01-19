@@ -13,7 +13,7 @@ contract ABAFaucet is ERC20, Ownable {
     using Counters for Counters.Counter;
 
     Counters.Counter private userCount;
-
+    
     uint256 public constant lockTime = 10 seconds;
     uint256 public constant withdrawalAmount = 2 * 10**15;
 
@@ -30,7 +30,7 @@ contract ABAFaucet is ERC20, Ownable {
     event Request(address indexed to, uint256 indexed amount);
 
     constructor() ERC20("ABA Coin", "ABA") payable {
-        // Give contract initially 300 ABA Coins
+        // Mint 300 ABA Coins for contract  
         mint(address(this), 300 * 10 ** 18);
     }
 
@@ -45,18 +45,13 @@ contract ABAFaucet is ERC20, Ownable {
     }
 
     /// @dev Donate tokens to faucet
-    receive() external payable {
-        if (users[msg.sender].userId == 0) {
-            logUser();
-        }
-        users[msg.sender].donated += msg.value;
-        emit Donate(msg.sender, msg.value);
-    }
+    receive() external payable {}
 
     function mint(address to, uint256 amount) public onlyOwner {
         _mint(to, amount);
     }
 
+    /// @dev Log users interacts with the contract
     function logUser() public {
         User memory user = User({
             userId: userCount.current(),
@@ -77,28 +72,34 @@ contract ABAFaucet is ERC20, Ownable {
         )
         { revert("can only request once in locktime"); }
 
-        /// @dev give token to first time requesters for the gas price
-        if(users[msg.sender].requestTime == 0) {
-            _mint(msg.sender, withdrawalAmount);
-        }
-
         if(users[msg.sender].userId == 0) {
             logUser();
         }
 
         users[msg.sender].requestTime = block.timestamp;
-        transfer(msg.sender, withdrawalAmount);
+        _transfer(address(this), msg.sender, withdrawalAmount);
         emit Request(msg.sender, withdrawalAmount);
     }
 
+    /// @dev Donate to faucet balance
+    function donate(uint _amount) public payable {
+        if (users[msg.sender].userId == 0) {
+            logUser();
+        }
+
+        _transfer(msg.sender, address(this), _amount);
+        users[msg.sender].donated += _amount;
+        emit Donate(msg.sender, _amount);
+    }
+
     /// @dev Get faucet balance
-    function getBalance() external view returns(uint256) {
+    function getBalance() public view returns(uint256) {
         return balanceOf(address(this));
     }
 
     /// @dev Widthdraw all faucet balance
-    function widthdraw() external onlyOwner {
-        transfer(msg.sender, balanceOf(address(this)));
+    function widthdraw() public onlyOwner {
+        _transfer(address(this), msg.sender, balanceOf(address(this)));
     }
 
 }
