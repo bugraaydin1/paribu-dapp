@@ -1,158 +1,105 @@
-import React, { useEffect } from "react";
-import {
-  Grid,
-  Paper,
-  Button,
-  TextField,
-  InputAdornment,
-  Typography
-} from "@mui/material";
-import { CurrencyBitcoinSharp } from "@mui/icons-material";
-import { contractABI, contractAddress } from "./utils/contract";
-import { ethers } from "ethers";
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
-export const Faucet = () => {
-  const [address, setAddress] = React.useState("");
-  const [amount, setAmount] = React.useState(0);
-  const [contract, setContract] = React.useState(null);
-  const [balance, setBalance] = React.useState(0);
-  const [isDonate, setIsDonate] = React.useState(false);
-  const [latestTx, setLatestTx] = React.useState([]);
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
-  const { ethereum } = window;
+/// @title ABACoinFaucet
+/// @author Ahmet Buğra Aydın
+/// @notice This contract aim is to mint and request ABA Coin's from faucet.
 
-  useEffect(() => {
-    connectToMetamask();
-    getContract();
-  }, []);
+contract ABAFaucet is ERC20, Ownable {
+    using Counters for Counters.Counter;
 
-  useEffect(() => {
-    if (contract) {
-      getBalance();
-      contract.on("Request", requestTxEvent);
-      contract.on("Donate", donateTxEvent);
-    }
-  }, [contract]);
+    Counters.Counter private userCount;
+    
+    uint256 public constant lockTime = 10 seconds;
+    uint256 public constant withdrawalAmount = 2 * 10**15;
 
-  const requestTxEvent = (to, amount) => {
-    getBalance();
-    setLatestTx([{ to, amount, type: "Request" }, ...latestTx]);
-  };
-
-  const donateTxEvent = (to, amount) => {
-    getBalance();
-    setLatestTx([{ to, amount, type: "Donate" }, ...latestTx]);
-  };
-
-  const connectToMetamask = async () => {
-    const provider = new ethers.providers.Web3Provider(ethereum);
-    await provider.send("eth_requestAccounts", []);
-  };
-
-  const getContract = async () => {
-    const provider = new ethers.providers.Web3Provider(ethereum);
-    const signer = provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, contractABI, signer);
-    setContract(contract);
-  };
-
-  const handleAddressInput = (evt) => {
-    setAddress(evt.target.value);
-  };
-
-  const handleAmountInput = (evt) => {
-    setAmount(evt.target.value);
-  };
-
-  const handleSend = async () => {
-    if (isDonate) {
-      await contract?.donate(amount * 100000);
-      return;
+    struct User {
+        uint256 userId;
+        address userAddress;
+        uint256 requestTime;
+        uint256 donated;
     }
 
-    if (address !== "" && address.length > 41) {
-      await contract?.requestTokens();
-      getBalance();
+    mapping(address => User) public users;
+
+    event Donate(address indexed from, uint256 indexed amount);
+    event Request(address indexed to, uint256 indexed amount);
+
+    constructor() ERC20("ABA Coin", "ABA") payable {
+        // Mint 300 ABA Coins for contract  
+        mint(address(this), 300 * 10 ** 18);
     }
-  };
 
-  const getBalance = async () => {
-    let balance = await contract?.getBalance();
-    setBalance(Number(balance));
-  };
+    modifier nonZeroAddress() {
+        require(msg.sender != address(0), "address can not be zero");
+        _;
+    }
 
-  return (
-    <Paper elevation={2} className="bg-gradient">
-      <Grid mt={2} justifyContent="flex-end" container>
-        <Button variant="outlined" onClick={() => setIsDonate(!isDonate)}>
-          {isDonate ? "Request" : "Donate"}
-        </Button>
-      </Grid>
+    modifier validBalance() {
+        require(balanceOf(address(this)) > withdrawalAmount, "main balance is low");
+        _;
+    }
 
-      <Grid pt={2}>
-        <Typography color="primary.dark">Total Faucet Balance</Typography>
-        <Typography> {balance} ABA</Typography>
-      </Grid>
+    /// @dev Donate tokens to faucet
+    receive() external payable {}
 
-      <Grid
-        p={2}
-        spacing={2}
-        justifyContent="center"
-        alignItems="center"
-        container
-      >
-        <Grid item>
-          <TextField
-            size="small"
-            placeholder="Wallet Address (0x...)"
-            variant="outlined"
-            onChange={handleAddressInput}
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="start">
-                  <CurrencyBitcoinSharp />
-                </InputAdornment>
-              )
-            }}
-          />
+    function mint(address to, uint256 amount) public onlyOwner {
+        _mint(to, amount);
+    }
 
-          {isDonate && (
-            <TextField
-              size="small"
-              placeholder="amount x100.000"
-              variant="outlined"
-              type="number"
-              onChange={handleAmountInput}
-            />
-          )}
-        </Grid>
-        <Grid item>
-          {!isDonate ? (
-            <Button variant="contained" onClick={handleSend}>
-              Send Me ABA
-            </Button>
-          ) : (
-            <Button variant="contained" onClick={handleSend}>
-              Donate ABA
-            </Button>
-          )}
-        </Grid>
-      </Grid>
+    /// @dev Log users interacts with the contract
+    function logUser() public {
+        User memory user = User({
+            userId: userCount.current(),
+            userAddress: msg.sender,
+            requestTime: 0,
+            donated: 0
+        });
 
-      <Grid pt={3} pb={6}>
-        <Typography color="primary.dark">Latest Transactions</Typography>
-        {latestTx.map((tx) => (
-          <Paper key={tx.to + tx.from} p={3}>
-            <Typography> {tx.type} </Typography>
-            {!isDonate ? (
-              <Typography> To: {tx.to} </Typography>
-            ) : (
-              <Typography> From: {tx.from} </Typography>
-            )}
-            <Typography> {Number(tx.amount)} ABA</Typography>
-          </Paper>
-        ))}
-      </Grid>
-    </Paper>
-  );
-};
+        users[msg.sender] = user;
+        userCount.increment();
+    }
+
+    /// @dev Request tokens from faucet
+    function requestTokens() public  nonZeroAddress validBalance {
+        if (
+            users[msg.sender].requestTime != 0
+            && users[msg.sender].requestTime + lockTime > block.timestamp
+        )
+        { revert("can only request once in locktime"); }
+
+        if(users[msg.sender].userId == 0) {
+            logUser();
+        }
+
+        users[msg.sender].requestTime = block.timestamp;
+        _transfer(address(this), msg.sender, withdrawalAmount);
+        emit Request(msg.sender, withdrawalAmount);
+    }
+
+    /// @dev Donate to faucet balance
+    function donate(uint _amount) public payable {
+        if (users[msg.sender].userId == 0) {
+            logUser();
+        }
+
+        _transfer(msg.sender, address(this), _amount);
+        users[msg.sender].donated += _amount;
+        emit Donate(msg.sender, _amount);
+    }
+
+    /// @dev Get faucet balance
+    function getBalance() public view returns(uint256) {
+        return balanceOf(address(this));
+    }
+
+    /// @dev Widthdraw all faucet balance
+    function widthdraw() public onlyOwner {
+        _transfer(address(this), msg.sender, balanceOf(address(this)));
+    }
+
+}
