@@ -24,20 +24,23 @@ export const Faucet = () => {
   useEffect(() => {
     connectToMetamask();
     getContract();
-    getBalance();
-  }, [contract]);
+  }, []);
 
   useEffect(() => {
-    contract?.on("Request", requestTxEvent);
-    contract?.on("Donate", donateTxEvent);
-    // return () => contract?.un("Request", requestTxEvent);
+    if (contract) {
+      getBalance();
+      contract.on("Request", requestTxEvent);
+      contract.on("Donate", donateTxEvent);
+    }
   }, [contract]);
 
   const requestTxEvent = (to, amount) => {
+    getBalance();
     setLatestTx([{ to, amount, type: "Request" }, ...latestTx]);
   };
 
   const donateTxEvent = (to, amount) => {
+    getBalance();
     setLatestTx([{ to, amount, type: "Donate" }, ...latestTx]);
   };
 
@@ -139,7 +142,7 @@ export const Faucet = () => {
       <Grid pt={3} pb={6}>
         <Typography color="primary.dark">Latest Transactions</Typography>
         {latestTx.map((tx) => (
-          <Paper p={3}>
+          <Paper key={tx.to + tx.from} p={3}>
             <Typography> {tx.type} </Typography>
             {!isDonate ? (
               <Typography> To: {tx.to} </Typography>
